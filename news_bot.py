@@ -20,17 +20,23 @@ import feedparser
 from bs4 import BeautifulSoup
 
 # ---------- ตั้งค่า ----------
-# หัวข้อข่าวที่จะดึง (แก้ query ตรงนี้ได้ตามต้องการ)
+# หัวข้อข่าวหลักที่จะดึง (แก้ query ตรงนี้ได้ตามต้องการ)
 NEWS_QUERY = (
     '"AI agent" OR "AI agents" OR "MCP" OR "Model Context Protocol" OR '
     '"new AI model" OR "releases" AI OR Anthropic OR Claude OR OpenAI OR Gemini OR '
     '"agentic AI" OR "AI coding" OR Cursor OR "GitHub Copilot" OR Codex OR '
     'Windsurf OR "coding assistant" OR "coding agent"'
 )
+# หัวข้อข่าวเกี่ยวกับ Claude Skills โดยเฉพาะ (แยกหมวดต่างหาก)
+SKILL_NEWS_QUERY = (
+    '"Claude Skills" OR "Claude Skill" OR "Claude Code skill" OR '
+    '"SKILL.md" OR "Agent Skills" OR "Anthropic skill"'
+)
 NEWS_LANG = "en-US"          # ภาษาแหล่งข่าว (en-US ให้ผลลัพธ์เยอะและครอบคลุมที่สุด)
 NEWS_COUNTRY = "US"
 FETCH_POOL_SIZE = 20         # ดึงข่าวมาเยอะๆ ก่อน แล้วค่อยกรองเอาที่ดีที่สุด
-MAX_ITEMS = 8                # จำนวนข่าวสุดท้ายที่จะส่งเข้า Discord ต่อวัน
+MAX_ITEMS = 8                # จำนวนข่าวหลักสุดท้ายที่จะส่งเข้า Discord ต่อวัน
+SKILL_MAX_ITEMS = 6          # จำนวน skill สุดท้ายที่จะส่งเข้า Discord ต่อวัน (เอาที่ดังๆ เป็นหลัก)
 TITLE_SIMILARITY_THRESHOLD = 0.55  # ถ้าหัวข้อคล้ายกันเกินนี้ ถือว่าเป็นข่าวซ้ำ (0-1)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -46,10 +52,10 @@ GEMINI_URL = (
 alert_messages = []
 
 
-def fetch_news():
-    """ดึงข่าวจาก Google News RSS แล้วจัดกลุ่มข่าวที่พูดเรื่องเดียวกัน (หัวข้อคล้ายกันมาก)
-    ข่าวที่มีหลายสำนักข่าวรายงานพร้อมกัน = ข่าวใหญ่/สำคัญ จะถูกจัดให้ขึ้นก่อน"""
-    query = urllib.parse.quote(NEWS_QUERY)
+def fetch_news_by_query(query_text, max_items):
+    """ดึงข่าวจาก Google News RSS ตาม query ที่กำหนด แล้วจัดกลุ่มข่าวที่พูดเรื่องเดียวกัน
+    (หัวข้อคล้ายกันมาก) เรื่องที่มีหลายแหล่งพูดถึงพร้อมกัน = ดัง/สำคัญกว่า จะถูกจัดให้ขึ้นก่อน"""
+    query = urllib.parse.quote(query_text)
     url = (
         f"https://news.google.com/rss/search?q={query}"
         f"&hl={NEWS_LANG}&gl={NEWS_COUNTRY}&ceid={NEWS_COUNTRY}:{NEWS_LANG.split('-')[0]}"
@@ -65,7 +71,7 @@ def fetch_news():
             }
         )
 
-    # จัดกลุ่มข่าวที่หัวข้อคล้ายกันมาก (ข่าวเดียวกันจากหลายสำนัก) เข้าด้วยกัน
+    # จัดกลุ่มข่าวที่หัวข้อคล้ายกันมาก (เรื่องเดียวกันจากหลายแหล่ง) เข้าด้วยกัน
     clusters = []  # each: {"items": [...]}
     for item in raw_items:
         matched_cluster = None
@@ -80,16 +86,24 @@ def fetch_news():
         else:
             clusters.append({"items": [item]})
 
-    # ข่าวที่มีหลายสำนักรายงาน (คลัสเตอร์ใหญ่กว่า) ถือว่าสำคัญกว่า -> เรียงจากมากไปน้อย
+    # เรื่องที่มีหลายแหล่งพูดถึง (คลัสเตอร์ใหญ่กว่า) ถือว่าดัง/สำคัญกว่า -> เรียงจากมากไปน้อย
     clusters.sort(key=lambda c: len(c["items"]), reverse=True)
 
     result = []
-    for cluster in clusters[:MAX_ITEMS]:
+    for cluster in clusters[:max_items]:
         representative = cluster["items"][0]
         representative["source_count"] = len(cluster["items"])
         result.append(representative)
 
     return result
+
+
+def fetch_news():
+    return fetch_news_by_query(NEWS_QUERY, MAX_ITEMS)
+
+
+def fetch_skill_news():
+    return fetch_news_by_query(SKILL_NEWS_QUERY, SKILL_MAX_ITEMS)
 
 
 def fetch_article_text(url, max_chars=800):
@@ -166,69 +180,114 @@ def call_gemini(prompt):
                 return None
 
 
-def summarize_with_gemini(items):
-    """สรุปข่าวทุกชิ้นเป็นภาษาไทยด้วย Gemini เรียกครั้งเดียวรวมทุกข่าว (ประหยัด quota มาก)
+def summarize_with_gemini(news_items, skill_items):
+    """สรุปข่าวหลักและ Claude Skills เป็นภาษาไทยด้วย Gemini เรียกครั้งเดียวรวมทุกอย่าง (ประหยัด quota มาก)
     โดยดึงเนื้อหาจริงจากแต่ละลิงก์มาก่อน (ไม่เสีย quota เพราะเป็นแค่การโหลดหน้าเว็บธรรมดา)"""
     if not GEMINI_API_KEY:
         print("ไม่พบ GEMINI_API_KEY จะข้ามขั้นตอนสรุป และส่งแค่หัวข้อ+ลิงก์แทน")
-        for item in items:
+        for item in news_items + skill_items:
             item["summary"] = None
-        return items
+        return news_items, skill_items
 
-    blocks = []
-    for i, item in enumerate(items, 1):
-        article_text = fetch_article_text(item["link"])
-        if article_text:
-            blocks.append(f"{i}. หัวข้อ: {item['title']}\nเนื้อหาบางส่วน: {article_text}")
-        else:
-            blocks.append(f"{i}. หัวข้อ: {item['title']}\n(ไม่มีเนื้อหาเพิ่มเติม)")
+    def build_blocks(items):
+        blocks = []
+        for i, item in enumerate(items, 1):
+            article_text = fetch_article_text(item["link"])
+            if article_text:
+                blocks.append(f"{i}. หัวข้อ: {item['title']}\nเนื้อหาบางส่วน: {article_text}")
+            else:
+                blocks.append(f"{i}. หัวข้อ: {item['title']}\n(ไม่มีเนื้อหาเพิ่มเติม)")
+        return "\n\n".join(blocks)
 
-    combined = "\n\n".join(blocks)
-    prompt = (
-        "ต่อไปนี้คือข่าวเทคโนโลยี/AI หลายข่าว สำหรับผู้อ่านที่เป็นนักพัฒนา (dev) ที่สนใจ AI agent, "
+    news_block = build_blocks(news_items) if news_items else ""
+    skill_block = build_blocks(skill_items) if skill_items else ""
+
+    prompt_parts = [
+        "ต่อไปนี้คือข่าวเทคโนโลยี/AI สำหรับผู้อ่านที่เป็นนักพัฒนา (dev) ที่สนใจ AI agent, "
         "MCP (Model Context Protocol), เครื่องมือ AI coding (เช่น Cursor, GitHub Copilot, Codex), "
-        "โมเดล AI ใหม่ๆ จากทุกค่าย (OpenAI, Anthropic, Google ฯลฯ) และความเปลี่ยนแปลงของวงการ AI "
-        "แต่ละข่าวมีหัวข้อและเนื้อหาบางส่วนกำกับด้วยหมายเลข "
-        "ช่วยสรุปแต่ละข่าวเป็นภาษาไทย ข่าวละ 1-2 ประโยคสั้นๆ กระชับ (ไม่เกิน 40 คำต่อข่าว) "
-        "ให้สรุปโดยอิงจากเนื้อหาจริงที่ให้มา ระบุรายละเอียดสำคัญที่เจาะจง เช่น ถ้าข่าวพูดถึง 'รายการ N ข้อ' "
-        "ให้บอกว่ามีอะไรบ้างสั้นๆ ถ้าเป็นข่าวเปิดตัวโมเดล/ฟีเจอร์ใหม่หรืออัปเดตเวอร์ชัน ให้ระบุชื่อเวอร์ชัน/ฟีเจอร์ใหม่ที่ชัดเจน "
-        "และเน้นว่ามันทำอะไรได้ใหม่ที่ dev น่าจะสนใจ "
-        "ถ้าข่าวไหนไม่มีเนื้อหาเพิ่มเติม ให้สรุปเท่าที่ตีความได้จากหัวข้อเท่านั้น "
-        "ห้ามเดาหรือแต่งเติมข้อมูลที่ไม่มีในต้นฉบับ\n\n"
-        "ตอบกลับเป็นรายการโดยขึ้นต้นแต่ละบรรทัดด้วยหมายเลขให้ตรงกับต้นฉบับ หนึ่งข่าวต่อหนึ่งบรรทัด "
-        "ห้ามใส่คำอธิบายอื่นนอกจากสรุป:\n\n" + combined
-    )
+        "โมเดล AI ใหม่ๆ จากทุกค่าย (OpenAI, Anthropic, Google ฯลฯ) และ Claude Skills โดยเฉพาะ "
+        "งานแบ่งเป็น 2 ส่วน กรุณาทำตามรูปแบบการตอบที่กำหนดให้เป๊ะๆ\n"
+    ]
 
+    if news_block:
+        prompt_parts.append(
+            "=== ส่วนที่ 1: ข่าวเทคโนโลยี/AI ทั่วไป ===\n"
+            "สรุปแต่ละข่าวเป็นภาษาไทย ข่าวละ 1-2 ประโยคสั้นๆ กระชับ (ไม่เกิน 40 คำต่อข่าว) "
+            "อิงจากเนื้อหาจริงที่ให้มา ระบุรายละเอียดเจาะจง เช่นถ้าพูดถึง 'รายการ N ข้อ' ให้บอกว่ามีอะไรบ้าง "
+            "ถ้าเป็นข่าวเปิดตัว/อัปเดตเวอร์ชัน ให้ระบุชื่อเวอร์ชัน/ฟีเจอร์ใหม่ที่ชัดเจน และเน้นว่ามันทำอะไรได้ใหม่ที่ dev สนใจ "
+            "ถ้าข่าวไหนไม่มีเนื้อหาเพิ่มเติม ให้สรุปเท่าที่ตีความได้จากหัวข้อเท่านั้น ห้ามเดาหรือแต่งเติม\n\n"
+            + news_block
+            + "\n\nตอบกลับส่วนนี้โดยขึ้นต้นด้วยบรรทัด 'NEWS:' แล้วตามด้วยรายการหมายเลขตรงกับต้นฉบับ หนึ่งข่าวต่อหนึ่งบรรทัด ห้ามใส่คำอธิบายอื่น\n"
+        )
+
+    if skill_block:
+        prompt_parts.append(
+            "\n=== ส่วนที่ 2: Claude Skills ที่น่าสนใจ ===\n"
+            "สรุปแต่ละ skill เป็นภาษาไทย skill ละ 1-2 ประโยค (ไม่เกิน 40 คำ) โดยเน้นบอกว่า "
+            "'มันทำอะไรได้' และ 'ทำไมถึงเจ๋ง/น่าลองใช้' ให้คนอ่านรู้สึกอยากลองทันที ใช้โทนกระตือรือร้นแต่ยังสุภาพ "
+            "อิงจากเนื้อหาจริงที่ให้มาเท่านั้น ถ้าข้อมูลไม่พอให้สรุปเท่าที่ตีความได้จากหัวข้อ ห้ามเดาหรือแต่งเติม\n\n"
+            + skill_block
+            + "\n\nตอบกลับส่วนนี้โดยขึ้นต้นด้วยบรรทัด 'SKILL:' แล้วตามด้วยรายการหมายเลขตรงกับต้นฉบับ หนึ่ง skill ต่อหนึ่งบรรทัด ห้ามใส่คำอธิบายอื่น\n"
+        )
+
+    prompt = "\n".join(prompt_parts)
     result = call_gemini(prompt)
+
     if not result:
-        for item in items:
+        for item in news_items + skill_items:
             item["summary"] = None
-        return items
+        return news_items, skill_items
 
-    lines = [l.strip() for l in result.split("\n") if l.strip()]
-    for i, item in enumerate(items):
-        if i < len(lines):
-            cleaned = lines[i]
-            for sep in [". ", ") "]:
-                if sep in cleaned[:5]:
-                    cleaned = cleaned.split(sep, 1)[1]
-                    break
-            item["summary"] = cleaned
-        else:
-            item["summary"] = None
+    # แยกส่วน NEWS: และ SKILL: ออกจากกัน
+    news_text = ""
+    skill_text = ""
+    news_match = re.search(r"NEWS:(.*?)(?=SKILL:|$)", result, re.DOTALL)
+    skill_match = re.search(r"SKILL:(.*)", result, re.DOTALL)
+    if news_match:
+        news_text = news_match.group(1).strip()
+    if skill_match:
+        skill_text = skill_match.group(1).strip()
 
-    return items
+    def apply_summaries(items, text):
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+        for i, item in enumerate(items):
+            if i < len(lines):
+                cleaned = lines[i]
+                for sep in [". ", ") "]:
+                    if sep in cleaned[:5]:
+                        cleaned = cleaned.split(sep, 1)[1]
+                        break
+                item["summary"] = cleaned
+            else:
+                item["summary"] = None
+
+    apply_summaries(news_items, news_text)
+    apply_summaries(skill_items, skill_text)
+
+    return news_items, skill_items
 
 
-def build_discord_message(items):
+def build_discord_message(news_items, skill_items):
     today = time.strftime("%d/%m/%Y")
     lines = [f"📰 **สรุปข่าวเทคโนโลยี/AI ประจำวันที่ {today}**\n"]
-    for i, it in enumerate(items, 1):
+
+    for i, it in enumerate(news_items, 1):
         summary = it.get("summary")
         text = summary if summary else it["title"]
-        # ถ้ามีหลายสำนักข่าวรายงานเรื่องเดียวกัน แปลว่าเป็นข่าวใหญ่ ใส่ 🔥 กำกับไว้
+        # ถ้ามีหลายแหล่งพูดถึงเรื่องเดียวกัน แปลว่าเป็นข่าวใหญ่ ใส่ 🔥 กำกับไว้
         tag = " 🔥" if it.get("source_count", 1) >= 3 else ""
         lines.append(f"**{i}.**{tag} {text} — {it['link']}")
+
+    lines.append("\n🛠️ **Claude Skills น่าสนใจวันนี้**\n")
+    if skill_items:
+        for i, it in enumerate(skill_items, 1):
+            summary = it.get("summary")
+            text = summary if summary else it["title"]
+            tag = " 🔥" if it.get("source_count", 1) >= 3 else ""
+            lines.append(f"**{i}.**{tag} {text} — {it['link']}")
+    else:
+        lines.append("วันนี้ไม่มี skill ใหม่")
+
     return "\n".join(lines)
 
 
@@ -249,12 +308,15 @@ def send_to_discord(message):
 
 
 def main():
-    items = fetch_news()
-    if not items:
+    news_items = fetch_news()
+    skill_items = fetch_skill_news()
+
+    if not news_items and not skill_items:
         print("ไม่พบข่าวในตอนนี้")
         return
-    items = summarize_with_gemini(items)
-    message = build_discord_message(items)
+
+    news_items, skill_items = summarize_with_gemini(news_items, skill_items)
+    message = build_discord_message(news_items, skill_items)
     send_to_discord(message)
 
     # ถ้ามีปัญหาที่ต้องแจ้งเตือน (เช่นโมเดล Gemini ถูกปิด หรือโควตาหมด) ส่งแจ้งเตือนแยกต่างหาก
