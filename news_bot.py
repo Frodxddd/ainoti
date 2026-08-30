@@ -12,13 +12,12 @@ import os
 import sys
 import time
 import html
-import urllib.parse
 import requests
 import feedparser
 
 # ---------- ตั้งค่า ----------
 # หัวข้อข่าวที่จะดึง (แก้ query ตรงนี้ได้ตามต้องการ)
-NEWS_QUERY = 'Anthropic OR Claude OR "AI agent" OR "new AI model" OR OpenAI OR Gemini'
+NEWS_QUERY = "technology OR artificial intelligence OR AI"
 NEWS_LANG = "en-US"          # ภาษาแหล่งข่าว (en-US ให้ผลลัพธ์เยอะและครอบคลุมที่สุด)
 NEWS_COUNTRY = "US"
 MAX_ITEMS = 8                # จำนวนข่าวสูงสุดต่อวัน
@@ -26,7 +25,7 @@ MAX_ITEMS = 8                # จำนวนข่าวสูงสุดต�
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
-GEMINI_MODEL = "gemini-3.6-flash"
+GEMINI_MODEL = "gemini-2.0-flash"
 GEMINI_URL = (
     f"https://generativelanguage.googleapis.com/v1beta/models/"
     f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
@@ -35,7 +34,7 @@ GEMINI_URL = (
 
 def fetch_news():
     """ดึงข่าวจาก Google News RSS"""
-    query = urllib.parse.quote(NEWS_QUERY)
+    query = NEWS_QUERY.replace(" ", "%20")
     url = (
         f"https://news.google.com/rss/search?q={query}"
         f"&hl={NEWS_LANG}&gl={NEWS_COUNTRY}&ceid={NEWS_COUNTRY}:{NEWS_LANG.split('-')[0]}"
@@ -62,47 +61,35 @@ def summarize_with_gemini(items):
     numbered = "\n".join(f"{i+1}. {it['title']}" for i, it in enumerate(items))
     prompt = (
         "ต่อไปนี้คือหัวข้อข่าวเทคโนโลยี/AI ภาษาอังกฤษ "
-        "ช่วยสรุปแต่ละข่าวเป็นภาษาไทย สั้นมากๆ แค่ 4-8 คำ บอกว่า 'ใคร ทำอะไร' "
-        "เช่น 'Anthropic เปิดตัวโมเดลใหม่ ฉลาดขึ้น' หรือ 'OpenAI ปล่อยฟีเจอร์เอเจนต์ใหม่' "
-        "ไม่ต้องมีคำฟุ่มเฟือย ไม่ต้องเป็นประโยคสมบูรณ์ "
+        "ช่วยสรุปแต่ละข่าวเป็นภาษาไทย สั้นที่สุดเท่าที่จะทำได้ ไม่เกิน 10 คำ "
+        "แบบวลีเดียวจับใจความหลัก ไม่ต้องเป็นประโยคสมบูรณ์ ไม่ต้องมีหางประโยค "
         "ตอบกลับเป็นรายการโดยขึ้นต้นแต่ละบรรทัดด้วยหมายเลขให้ตรงกับต้นฉบับ "
         "ห้ามใส่คำอธิบายอื่นนอกจากสรุป:\n\n" + numbered
     )
 
     body = {"contents": [{"parts": [{"text": prompt}]}]}
-    max_retries = 3
-    for attempt in range(1, max_retries + 1):
-        try:
-            resp = requests.post(GEMINI_URL, json=body, timeout=30)
-            if resp.status_code in (429, 503) and attempt < max_retries:
-                wait = attempt * 5
-                print(f"Gemini โหลดสูง/limit (status {resp.status_code}) รอ {wait} วิ แล้วลองใหม่ (ครั้งที่ {attempt})")
-                time.sleep(wait)
-                continue
-            if not resp.ok:
-                print(f"Gemini ตอบกลับ error {resp.status_code}: {resp.text[:500]}")
-            resp.raise_for_status()
-            data = resp.json()
-            text = data["candidates"][0]["content"]["parts"][0]["text"]
-            lines = [l.strip() for l in text.strip().split("\n") if l.strip()]
+    try:
+        resp = requests.post(GEMINI_URL, json=body, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+        lines = [l.strip() for l in text.strip().split("\n") if l.strip()]
 
-            for i, item in enumerate(items):
-                if i < len(lines):
-                    # ตัดหมายเลขนำหน้าออก เช่น "1. " หรือ "1) "
-                    cleaned = lines[i]
-                    for sep in [". ", ") "]:
-                        if sep in cleaned[:5]:
-                            cleaned = cleaned.split(sep, 1)[1]
-                            break
-                    item["summary"] = cleaned
-                else:
-                    item["summary"] = None
-            break
-        except Exception as e:
-            print(f"เรียก Gemini ไม่สำเร็จ (ครั้งที่ {attempt}): {type(e).__name__}: {e}")
-            if attempt >= max_retries:
-                for item in items:
-                    item["summary"] = None
+        for i, item in enumerate(items):
+            if i < len(lines):
+                # ตัดหมายเลขนำหน้าออก เช่น "1. " หรือ "1) "
+                cleaned = lines[i]
+                for sep in [". ", ") "]:
+                    if sep in cleaned[:5]:
+                        cleaned = cleaned.split(sep, 1)[1]
+                        break
+                item["summary"] = cleaned
+            else:
+                item["summary"] = None
+    except Exception as e:
+        print(f"เรียก Gemini ไม่สำเร็จ: {e}")
+        for item in items:
+            item["summary"] = None
 
     return items
 
