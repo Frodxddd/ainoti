@@ -12,12 +12,13 @@ import os
 import sys
 import time
 import html
+import urllib.parse
 import requests
 import feedparser
 
 # ---------- ตั้งค่า ----------
 # หัวข้อข่าวที่จะดึง (แก้ query ตรงนี้ได้ตามต้องการ)
-NEWS_QUERY = "technology OR artificial intelligence OR AI"
+NEWS_QUERY = 'Anthropic OR Claude OR "AI agent" OR "new AI model" OR OpenAI OR Gemini'
 NEWS_LANG = "en-US"          # ภาษาแหล่งข่าว (en-US ให้ผลลัพธ์เยอะและครอบคลุมที่สุด)
 NEWS_COUNTRY = "US"
 MAX_ITEMS = 8                # จำนวนข่าวสูงสุดต่อวัน
@@ -34,7 +35,7 @@ GEMINI_URL = (
 
 def fetch_news():
     """ดึงข่าวจาก Google News RSS"""
-    query = NEWS_QUERY.replace(" ", "%20")
+    query = urllib.parse.quote(NEWS_QUERY)
     url = (
         f"https://news.google.com/rss/search?q={query}"
         f"&hl={NEWS_LANG}&gl={NEWS_COUNTRY}&ceid={NEWS_COUNTRY}:{NEWS_LANG.split('-')[0]}"
@@ -61,8 +62,9 @@ def summarize_with_gemini(items):
     numbered = "\n".join(f"{i+1}. {it['title']}" for i, it in enumerate(items))
     prompt = (
         "ต่อไปนี้คือหัวข้อข่าวเทคโนโลยี/AI ภาษาอังกฤษ "
-        "ช่วยสรุปแต่ละข่าวเป็นภาษาไทย สั้นที่สุดเท่าที่จะทำได้ ไม่เกิน 10 คำ "
-        "แบบวลีเดียวจับใจความหลัก ไม่ต้องเป็นประโยคสมบูรณ์ ไม่ต้องมีหางประโยค "
+        "ช่วยสรุปแต่ละข่าวเป็นภาษาไทย สั้นมากๆ แค่ 4-8 คำ บอกว่า 'ใคร ทำอะไร' "
+        "เช่น 'Anthropic เปิดตัวโมเดลใหม่ ฉลาดขึ้น' หรือ 'OpenAI ปล่อยฟีเจอร์เอเจนต์ใหม่' "
+        "ไม่ต้องมีคำฟุ่มเฟือย ไม่ต้องเป็นประโยคสมบูรณ์ "
         "ตอบกลับเป็นรายการโดยขึ้นต้นแต่ละบรรทัดด้วยหมายเลขให้ตรงกับต้นฉบับ "
         "ห้ามใส่คำอธิบายอื่นนอกจากสรุป:\n\n" + numbered
     )
@@ -70,6 +72,8 @@ def summarize_with_gemini(items):
     body = {"contents": [{"parts": [{"text": prompt}]}]}
     try:
         resp = requests.post(GEMINI_URL, json=body, timeout=30)
+        if not resp.ok:
+            print(f"Gemini ตอบกลับ error {resp.status_code}: {resp.text[:500]}")
         resp.raise_for_status()
         data = resp.json()
         text = data["candidates"][0]["content"]["parts"][0]["text"]
@@ -87,7 +91,7 @@ def summarize_with_gemini(items):
             else:
                 item["summary"] = None
     except Exception as e:
-        print(f"เรียก Gemini ไม่สำเร็จ: {e}")
+        print(f"เรียก Gemini ไม่สำเร็จ: {type(e).__name__}: {e}")
         for item in items:
             item["summary"] = None
 
