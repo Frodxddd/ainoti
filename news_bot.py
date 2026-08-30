@@ -54,7 +54,7 @@ def fetch_news():
     return items
 
 
-def fetch_article_text(url, max_chars=3000):
+def fetch_article_text(url, max_chars=1500):
     """พยายามดึงเนื้อหาจริงของข่าวจากลิงก์ (best-effort, อาจได้บ้างไม่ได้บ้างแล้วแต่เว็บ)"""
     headers = {
         "User-Agent": (
@@ -97,12 +97,12 @@ def summarize_one_with_gemini(item):
     )
 
     body = {"contents": [{"parts": [{"text": prompt}]}]}
-    max_retries = 2
+    max_retries = 3
     for attempt in range(1, max_retries + 1):
         try:
-            resp = requests.post(GEMINI_URL, json=body, timeout=30)
+            resp = requests.post(GEMINI_URL, json=body, timeout=60)
             if resp.status_code in (429, 503) and attempt < max_retries:
-                wait = attempt * 5
+                wait = attempt * 10
                 print(f"Gemini โหลดสูง/limit (status {resp.status_code}) รอ {wait} วิ แล้วลองใหม่")
                 time.sleep(wait)
                 continue
@@ -112,6 +112,12 @@ def summarize_one_with_gemini(item):
             data = resp.json()
             text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
             return text
+        except requests.exceptions.Timeout:
+            print(f"เรียก Gemini timeout (ครั้งที่ {attempt})")
+            if attempt < max_retries:
+                time.sleep(attempt * 10)
+                continue
+            return None
         except Exception as e:
             print(f"เรียก Gemini ไม่สำเร็จ (ครั้งที่ {attempt}): {type(e).__name__}: {e}")
             if attempt >= max_retries:
