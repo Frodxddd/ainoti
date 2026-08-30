@@ -27,10 +27,11 @@ NEWS_QUERY = (
     '"agentic AI" OR "AI coding" OR Cursor OR "GitHub Copilot" OR Codex OR '
     'Windsurf OR "coding assistant" OR "coding agent"'
 )
-# หัวข้อข่าวเกี่ยวกับ Claude Skills โดยเฉพาะ (แยกหมวดต่างหาก)
+# หัวข้อข่าวเกี่ยวกับเครื่องมือ/ความสามารถเสริมของ AI agent จากทุกค่าย ไม่เจาะจงแบรนด์ใดแบรนด์หนึ่ง
 SKILL_NEWS_QUERY = (
-    '"Claude Skills" OR "Claude Skill" OR "Claude Code skill" OR '
-    '"SKILL.md" OR "Agent Skills" OR "Anthropic skill"'
+    '"AI tool" OR "AI plugin" OR "agent tool" OR "AI extension" OR "AI integration" OR '
+    '"MCP server" OR "MCP servers" OR "Custom GPT" OR "GPT Store" OR "ChatGPT plugin" OR '
+    '"Claude Skills" OR "SKILL.md" OR "Agent Skills" OR "new AI capability" OR "AI connector"'
 )
 NEWS_LANG = "en-US"          # ภาษาแหล่งข่าว (en-US ให้ผลลัพธ์เยอะและครอบคลุมที่สุด)
 NEWS_COUNTRY = "US"
@@ -205,7 +206,7 @@ def summarize_with_gemini(news_items, skill_items):
     prompt_parts = [
         "ต่อไปนี้คือข่าวเทคโนโลยี/AI สำหรับผู้อ่านที่เป็นนักพัฒนา (dev) ที่สนใจ AI agent, "
         "MCP (Model Context Protocol), เครื่องมือ AI coding (เช่น Cursor, GitHub Copilot, Codex), "
-        "โมเดล AI ใหม่ๆ จากทุกค่าย (OpenAI, Anthropic, Google ฯลฯ) และ Claude Skills โดยเฉพาะ "
+        "โมเดล AI ใหม่ๆ จากทุกค่าย (OpenAI, Anthropic, Google ฯลฯ) และเครื่องมือเสริม/tool/plugin สำหรับ AI agent "
         "งานแบ่งเป็น 2 ส่วน กรุณาทำตามรูปแบบการตอบที่กำหนดให้เป๊ะๆ\n"
     ]
 
@@ -222,12 +223,14 @@ def summarize_with_gemini(news_items, skill_items):
 
     if skill_block:
         prompt_parts.append(
-            "\n=== ส่วนที่ 2: Claude Skills ที่น่าสนใจ ===\n"
-            "สรุปแต่ละ skill เป็นภาษาไทย skill ละ 1-2 ประโยค (ไม่เกิน 40 คำ) โดยเน้นบอกว่า "
-            "'มันทำอะไรได้' และ 'ทำไมถึงเจ๋ง/น่าลองใช้' ให้คนอ่านรู้สึกอยากลองทันที ใช้โทนกระตือรือร้นแต่ยังสุภาพ "
+            "\n=== ส่วนที่ 2: เครื่องมือ/ความสามารถเสริมของ AI agent ที่น่าสนใจ (ทุกค่าย ไม่จำกัดว่าต้องเรียกว่า 'skill') ===\n"
+            "เช่น Claude Skill, MCP server ใหม่, ChatGPT plugin, Custom GPT, ปลั๊กอิน/extension/integration ใดๆ ก็ได้ที่เพิ่มความสามารถให้ AI agent "
+            "สรุปแต่ละอันเป็นภาษาไทย อันละ 1-2 ประโยค (ไม่เกิน 40 คำ) โดยเน้นบอกว่า "
+            "'มันทำอะไรได้' 'เป็นของค่ายไหน/แพลตฟอร์มไหน' และ "
+            "'ทำไมถึงเจ๋ง/น่าลองใช้' ให้คนอ่านรู้สึกอยากลองทันที ใช้โทนกระตือรือร้นแต่ยังสุภาพ "
             "อิงจากเนื้อหาจริงที่ให้มาเท่านั้น ถ้าข้อมูลไม่พอให้สรุปเท่าที่ตีความได้จากหัวข้อ ห้ามเดาหรือแต่งเติม\n\n"
             + skill_block
-            + "\n\nตอบกลับส่วนนี้โดยขึ้นต้นด้วยบรรทัด 'SKILL:' แล้วตามด้วยรายการหมายเลขตรงกับต้นฉบับ หนึ่ง skill ต่อหนึ่งบรรทัด ห้ามใส่คำอธิบายอื่น\n"
+            + "\n\nตอบกลับส่วนนี้โดยขึ้นต้นด้วยบรรทัด 'SKILL:' แล้วตามด้วยรายการหมายเลขตรงกับต้นฉบับ หนึ่งอันต่อหนึ่งบรรทัด ห้ามใส่คำอธิบายอื่น\n"
         )
 
     prompt = "\n".join(prompt_parts)
@@ -278,7 +281,7 @@ def build_discord_message(news_items, skill_items):
         tag = " 🔥" if it.get("source_count", 1) >= 3 else ""
         lines.append(f"**{i}.**{tag} {text} — {it['link']}")
 
-    lines.append("\n🛠️ **Claude Skills น่าสนใจวันนี้**\n")
+    lines.append("\n🛠️ **เครื่องมือ/ความสามารถเสริม AI น่าสนใจวันนี้**\n")
     if skill_items:
         for i, it in enumerate(skill_items, 1):
             summary = it.get("summary")
@@ -286,7 +289,7 @@ def build_discord_message(news_items, skill_items):
             tag = " 🔥" if it.get("source_count", 1) >= 3 else ""
             lines.append(f"**{i}.**{tag} {text} — {it['link']}")
     else:
-        lines.append("วันนี้ไม่มี skill ใหม่")
+        lines.append("วันนี้ไม่มีเครื่องมือ/ความสามารถใหม่ที่น่าสนใจ")
 
     return "\n".join(lines)
 
