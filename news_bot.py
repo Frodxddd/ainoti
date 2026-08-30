@@ -23,8 +23,9 @@ from bs4 import BeautifulSoup
 # หัวข้อข่าวที่จะดึง (แก้ query ตรงนี้ได้ตามต้องการ)
 NEWS_QUERY = (
     '"AI agent" OR "AI agents" OR "MCP" OR "Model Context Protocol" OR '
-    '"new AI model" OR "releases" AI OR Anthropic OR Claude OR OpenAI OR '
-    '"agentic AI" OR "AI coding"'
+    '"new AI model" OR "releases" AI OR Anthropic OR Claude OR OpenAI OR Gemini OR '
+    '"agentic AI" OR "AI coding" OR Cursor OR "GitHub Copilot" OR Codex OR '
+    'Windsurf OR "coding assistant" OR "coding agent"'
 )
 NEWS_LANG = "en-US"          # ภาษาแหล่งข่าว (en-US ให้ผลลัพธ์เยอะและครอบคลุมที่สุด)
 NEWS_COUNTRY = "US"
@@ -185,11 +186,13 @@ def summarize_with_gemini(items):
     combined = "\n\n".join(blocks)
     prompt = (
         "ต่อไปนี้คือข่าวเทคโนโลยี/AI หลายข่าว สำหรับผู้อ่านที่เป็นนักพัฒนา (dev) ที่สนใจ AI agent, "
-        "MCP (Model Context Protocol), โมเดล AI ใหม่ๆ และความเปลี่ยนแปลงของวงการ AI "
+        "MCP (Model Context Protocol), เครื่องมือ AI coding (เช่น Cursor, GitHub Copilot, Codex), "
+        "โมเดล AI ใหม่ๆ จากทุกค่าย (OpenAI, Anthropic, Google ฯลฯ) และความเปลี่ยนแปลงของวงการ AI "
         "แต่ละข่าวมีหัวข้อและเนื้อหาบางส่วนกำกับด้วยหมายเลข "
         "ช่วยสรุปแต่ละข่าวเป็นภาษาไทย ข่าวละ 1-2 ประโยคสั้นๆ กระชับ (ไม่เกิน 40 คำต่อข่าว) "
         "ให้สรุปโดยอิงจากเนื้อหาจริงที่ให้มา ระบุรายละเอียดสำคัญที่เจาะจง เช่น ถ้าข่าวพูดถึง 'รายการ N ข้อ' "
-        "ให้บอกว่ามีอะไรบ้างสั้นๆ ถ้าเป็นข่าวเปิดตัวโมเดล/ฟีเจอร์ใหม่ ให้เน้นว่ามันทำอะไรได้ใหม่ที่ dev น่าจะสนใจ "
+        "ให้บอกว่ามีอะไรบ้างสั้นๆ ถ้าเป็นข่าวเปิดตัวโมเดล/ฟีเจอร์ใหม่หรืออัปเดตเวอร์ชัน ให้ระบุชื่อเวอร์ชัน/ฟีเจอร์ใหม่ที่ชัดเจน "
+        "และเน้นว่ามันทำอะไรได้ใหม่ที่ dev น่าจะสนใจ "
         "ถ้าข่าวไหนไม่มีเนื้อหาเพิ่มเติม ให้สรุปเท่าที่ตีความได้จากหัวข้อเท่านั้น "
         "ห้ามเดาหรือแต่งเติมข้อมูลที่ไม่มีในต้นฉบับ\n\n"
         "ตอบกลับเป็นรายการโดยขึ้นต้นแต่ละบรรทัดด้วยหมายเลขให้ตรงกับต้นฉบับ หนึ่งข่าวต่อหนึ่งบรรทัด "
