@@ -102,7 +102,7 @@ def summarize_one_with_gemini(item):
         try:
             resp = requests.post(GEMINI_URL, json=body, timeout=60)
             if resp.status_code in (429, 503) and attempt < max_retries:
-                wait = attempt * 10
+                wait = attempt * 20
                 print(f"Gemini โหลดสูง/limit (status {resp.status_code}) รอ {wait} วิ แล้วลองใหม่")
                 time.sleep(wait)
                 continue
@@ -132,8 +132,11 @@ def summarize_with_gemini(items):
             item["summary"] = None
         return items
 
-    for item in items:
+    for i, item in enumerate(items):
         item["summary"] = summarize_one_with_gemini(item)
+        # เว้นจังหวะระหว่างข่าว เพื่อไม่ให้ชน rate limit ของ Gemini free tier (20 req/นาที)
+        if i < len(items) - 1:
+            time.sleep(8)
 
     return items
 
