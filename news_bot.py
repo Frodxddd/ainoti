@@ -35,6 +35,7 @@ SKILL_NEWS_QUERY = (
 )
 NEWS_LANG = "en-US"          # ภาษาแหล่งข่าว (en-US ให้ผลลัพธ์เยอะและครอบคลุมที่สุด)
 NEWS_COUNTRY = "US"
+NEWS_RECENCY = "when:7d"     # เอาเฉพาะข่าวไม่เกิน 7 วันล่าสุด (Google News รองรับ when:1d, when:7d, when:1m ฯลฯ)
 FETCH_POOL_SIZE = 20         # ดึงข่าวมาเยอะๆ ก่อน แล้วค่อยกรองเอาที่ดีที่สุด
 MAX_ITEMS = 8                # จำนวนข่าวหลักสุดท้ายที่จะส่งเข้า Discord ต่อวัน
 SKILL_MAX_ITEMS = 6          # จำนวน skill สุดท้ายที่จะส่งเข้า Discord ต่อวัน (เอาที่ดังๆ เป็นหลัก)
@@ -56,7 +57,7 @@ alert_messages = []
 def fetch_news_by_query(query_text, max_items):
     """ดึงข่าวจาก Google News RSS ตาม query ที่กำหนด แล้วจัดกลุ่มข่าวที่พูดเรื่องเดียวกัน
     (หัวข้อคล้ายกันมาก) เรื่องที่มีหลายแหล่งพูดถึงพร้อมกัน = ดัง/สำคัญกว่า จะถูกจัดให้ขึ้นก่อน"""
-    query = urllib.parse.quote(query_text)
+    query = urllib.parse.quote(f"{query_text} {NEWS_RECENCY}")
     url = (
         f"https://news.google.com/rss/search?q={query}"
         f"&hl={NEWS_LANG}&gl={NEWS_COUNTRY}&ceid={NEWS_COUNTRY}:{NEWS_LANG.split('-')[0]}"
