@@ -35,11 +35,14 @@ TITLE_SIMILARITY_THRESHOLD = 0.55  # ถ้าหัวข้อคล้าย�
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
-GEMINI_MODEL = "gemini-2.5-flash-lite"
+GEMINI_MODEL = "gemini-3.5-flash-lite"
 GEMINI_URL = (
     f"https://generativelanguage.googleapis.com/v1beta/models/"
     f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 )
+
+# ใช้ติดตามว่าตอนนี้เจอปัญหาที่ต้องแจ้งเตือนผู้ใช้หรือไม่ (โมเดลถูกปิด / โควตาหมด)
+alert_messages = []
 
 
 def fetch_news():
@@ -117,6 +120,18 @@ def call_gemini(prompt):
     for attempt in range(1, max_retries + 1):
         try:
             resp = requests.post(GEMINI_URL, json=body, timeout=90)
+
+            if resp.status_code == 404:
+                print(f"Gemini ตอบกลับ error 404: {resp.text[:500]}")
+                # โมเดลถูกปิด/เปลี่ยนชื่อ -> ดึงชื่อโมเดลใหม่ที่ Google แนะนำจากข้อความ error มาแจ้งด้วย ถ้ามี
+                suggested = re.search(r"use models/([\w.\-]+)", resp.text)
+                suggestion = f" (Google แนะนำให้ใช้ `{suggested.group(1)}` แทน)" if suggested else ""
+                alert_messages.append(
+                    f"⚠️ **โมเดล Gemini `{GEMINI_MODEL}` ใช้งานไม่ได้แล้ว (ถูกปิด/เปลี่ยนชื่อ)**{suggestion}\n"
+                    f"กรุณาไปเปลี่ยนค่า `GEMINI_MODEL` ในไฟล์ `news_bot.py` เป็นโมเดลที่ยังใช้งานได้ แล้วอัปโหลดทับใน repo ครับ"
+                )
+                return None
+
             if resp.status_code in (429, 503) and attempt < max_retries:
                 # พยายามอ่านเวลาที่ Google บอกให้รอจริงๆ จากข้อความ error เช่น "retry in 45.29s"
                 match = re.search(r"retry in ([\d.]+)s", resp.text)
@@ -124,6 +139,15 @@ def call_gemini(prompt):
                 print(f"Gemini โหลดสูง/limit (status {resp.status_code}) รอ {wait:.0f} วิ แล้วลองใหม่")
                 time.sleep(wait)
                 continue
+
+            if resp.status_code == 429 and attempt >= max_retries:
+                print(f"Gemini ตอบกลับ error {resp.status_code}: {resp.text[:500]}")
+                alert_messages.append(
+                    f"⚠️ **Gemini (`{GEMINI_MODEL}`) โควตาฟรีวันนี้เต็มแล้ว** ข่าววันนี้เลยไม่มีสรุปให้ (ส่งแค่หัวข้อ+ลิงก์แทน) "
+                    f"ลองใหม่พรุ่งนี้ หรือเปลี่ยนไปใช้โมเดลอื่นที่ยังมี quota เหลือได้ครับ"
+                )
+                return None
+
             if not resp.ok:
                 print(f"Gemini ตอบกลับ error {resp.status_code}: {resp.text[:500]}")
             resp.raise_for_status()
@@ -229,6 +253,11 @@ def main():
     items = summarize_with_gemini(items)
     message = build_discord_message(items)
     send_to_discord(message)
+
+    # ถ้ามีปัญหาที่ต้องแจ้งเตือน (เช่นโมเดล Gemini ถูกปิด หรือโควตาหมด) ส่งแจ้งเตือนแยกต่างหาก
+    for alert in alert_messages:
+        send_to_discord(alert)
+
     print("ส่งข่าวเข้า Discord เรียบร้อยแล้ว")
 
 
