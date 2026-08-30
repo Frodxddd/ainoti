@@ -70,30 +70,39 @@ def summarize_with_gemini(items):
     )
 
     body = {"contents": [{"parts": [{"text": prompt}]}]}
-    try:
-        resp = requests.post(GEMINI_URL, json=body, timeout=30)
-        if not resp.ok:
-            print(f"Gemini ตอบกลับ error {resp.status_code}: {resp.text[:500]}")
-        resp.raise_for_status()
-        data = resp.json()
-        text = data["candidates"][0]["content"]["parts"][0]["text"]
-        lines = [l.strip() for l in text.strip().split("\n") if l.strip()]
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = requests.post(GEMINI_URL, json=body, timeout=30)
+            if resp.status_code in (429, 503) and attempt < max_retries:
+                wait = attempt * 5
+                print(f"Gemini โหลดสูง/limit (status {resp.status_code}) รอ {wait} วิ แล้วลองใหม่ (ครั้งที่ {attempt})")
+                time.sleep(wait)
+                continue
+            if not resp.ok:
+                print(f"Gemini ตอบกลับ error {resp.status_code}: {resp.text[:500]}")
+            resp.raise_for_status()
+            data = resp.json()
+            text = data["candidates"][0]["content"]["parts"][0]["text"]
+            lines = [l.strip() for l in text.strip().split("\n") if l.strip()]
 
-        for i, item in enumerate(items):
-            if i < len(lines):
-                # ตัดหมายเลขนำหน้าออก เช่น "1. " หรือ "1) "
-                cleaned = lines[i]
-                for sep in [". ", ") "]:
-                    if sep in cleaned[:5]:
-                        cleaned = cleaned.split(sep, 1)[1]
-                        break
-                item["summary"] = cleaned
-            else:
-                item["summary"] = None
-    except Exception as e:
-        print(f"เรียก Gemini ไม่สำเร็จ: {type(e).__name__}: {e}")
-        for item in items:
-            item["summary"] = None
+            for i, item in enumerate(items):
+                if i < len(lines):
+                    # ตัดหมายเลขนำหน้าออก เช่น "1. " หรือ "1) "
+                    cleaned = lines[i]
+                    for sep in [". ", ") "]:
+                        if sep in cleaned[:5]:
+                            cleaned = cleaned.split(sep, 1)[1]
+                            break
+                    item["summary"] = cleaned
+                else:
+                    item["summary"] = None
+            break
+        except Exception as e:
+            print(f"เรียก Gemini ไม่สำเร็จ (ครั้งที่ {attempt}): {type(e).__name__}: {e}")
+            if attempt >= max_retries:
+                for item in items:
+                    item["summary"] = None
 
     return items
 
